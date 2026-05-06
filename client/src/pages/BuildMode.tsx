@@ -240,16 +240,22 @@ export default function BuildMode() {
         />
       </aside>
 
-      <main className="overflow-x-hidden min-w-0">
+      <main className="overflow-x-hidden min-w-0" data-testid="build-main">
         <BuildBanner />
 
-        {/* Workbench: left = scoresheet images (toggle or split), right = transcriptions + accepted-line table. */}
-        <div
+        {/* Approved layout (do not regress — see FEATURES.md "Approved layout hierarchy"):
+            1. Top workbench: scoresheet images (left)  ‖  transcriptions + accepted-line table (right).
+            2. Below the workbench: interactive chess board for the accepted line.
+            3. Below the board: notes + issues/PGN export workspace.
+            Board and notes/exports must NEVER be stacked above the accepted-line table on desktop. */}
+
+        {/* ── 1. TOP WORKBENCH ── side-by-side image + transcriptions/accepted-line */}
+        <section
           className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:gap-3 lg:px-3 lg:py-3 lg:items-start"
           data-testid="build-workbench"
         >
-          {/* LEFT: scoresheet image pane — independently scrollable on desktop */}
-          <section
+          {/* LEFT: scoresheet image pane — sticky on desktop so it stays visible while the right column scrolls. */}
+          <div
             className="px-4 py-4 lg:p-0 lg:h-[calc(100vh-3.5rem-2.5rem)] lg:overflow-hidden lg:sticky lg:top-[calc(3.5rem+0.75rem)] flex flex-col gap-2 min-w-0"
             data-testid="build-image-pane"
           >
@@ -370,11 +376,12 @@ export default function BuildMode() {
                 </Card>
               </div>
             )}
-          </section>
+          </div>
 
-          {/* RIGHT: workspace — transcriptions (collapsible) + accepted-line table + board */}
-          <section
-            className="px-4 py-4 lg:p-0 lg:h-[calc(100vh-3.5rem-2.5rem)] lg:overflow-y-auto flex flex-col gap-3 min-w-0"
+          {/* RIGHT: workspace — transcriptions (collapsible) + accepted-line table.
+              Board, notes and exports live BELOW the workbench, not in this column. */}
+          <div
+            className="px-4 py-4 lg:p-0 flex flex-col gap-3 min-w-0"
             data-testid="build-workspace-pane"
           >
             {/* Transcriptions: collapsible to keep accepted-line table above the fold once filled in */}
@@ -417,58 +424,6 @@ export default function BuildMode() {
                       setText={setBlackText}
                       isActive={activeSheet === "black"}
                       activate={() => setActiveSheet("black")}
-                    />
-                  </div>
-                </div>
-              )}
-            </Card>
-
-            {/* Board replay + per-ply notes — promoted above the accepted-line table so the
-                interactive board and note editor are immediately visible without scrolling. */}
-            <Card className="overflow-hidden shrink-0" data-testid="card-build-board">
-              <button
-                type="button"
-                onClick={() => setBoardOpen((b) => !b)}
-                className="w-full flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-card text-left hover:bg-accent/40 transition-colors"
-                data-testid="button-toggle-build-board"
-                aria-expanded={boardOpen}
-              >
-                <div>
-                  <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                    Accepted line · per-ply notes
-                  </div>
-                  <h2 className="font-display text-base lg:text-lg font-semibold">
-                    Chess board &amp; reviewer notes
-                  </h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
-                    {syntheticGame.moves.length} ply
-                  </Badge>
-                  <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono" data-testid="badge-build-notes-count-header">
-                    {Object.values(notes).filter((v) => v.trim() !== "").length} note{Object.values(notes).filter((v) => v.trim() !== "").length === 1 ? "" : "s"}
-                  </Badge>
-                  {boardOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-                </div>
-              </button>
-              {boardOpen && (
-                <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0">
-                  <div className="h-[380px] xl:h-[440px] flex flex-col" data-testid="build-board-container">
-                    <ChessBoardViewer
-                      game={syntheticGame.moves.length > 0 ? syntheticGame : null}
-                      currentPly={boardPly}
-                      onPlyChange={setBoardPly}
-                      notedPlies={notedChipPlies}
-                    />
-                  </div>
-                  <div className="border-t xl:border-t-0 xl:border-l p-3" data-testid="build-note-container">
-                    <BuildNoteEditor
-                      currentNotePly={currentNotePly}
-                      san={currentNotePly !== null ? syntheticGame.moves[currentNotePly] ?? null : null}
-                      value={currentNoteValue}
-                      setValue={setNoteForCurrent}
-                      clear={clearNoteForCurrent}
-                      total={Object.values(notes).filter((v) => v.trim() !== "").length}
                     />
                   </div>
                 </div>
@@ -532,8 +487,84 @@ export default function BuildMode() {
               />
             </div>
 
-            {/* Export bar */}
-            <div data-testid="build-export-block">
+          </div>
+        </section>
+
+        {/* ── 2. INTERACTIVE BOARD (below the workbench, full width) ── */}
+        <section
+          className="px-4 lg:px-3 pb-3"
+          data-testid="build-board-section"
+        >
+          <Card className="overflow-hidden" data-testid="card-build-board">
+            <button
+              type="button"
+              onClick={() => setBoardOpen((b) => !b)}
+              className="w-full flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-card text-left hover:bg-accent/40 transition-colors"
+              data-testid="button-toggle-build-board"
+              aria-expanded={boardOpen}
+            >
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Accepted line
+                </div>
+                <h2 className="font-display text-base lg:text-lg font-semibold">
+                  Chess board
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
+                  {syntheticGame.moves.length} ply
+                </Badge>
+                {boardOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              </div>
+            </button>
+            {boardOpen && (
+              <div className="h-[460px] lg:h-[520px] flex flex-col" data-testid="build-board-container">
+                <ChessBoardViewer
+                  game={syntheticGame.moves.length > 0 ? syntheticGame : null}
+                  currentPly={boardPly}
+                  onPlyChange={setBoardPly}
+                  notedPlies={notedChipPlies}
+                />
+              </div>
+            )}
+          </Card>
+        </section>
+
+        {/* ── 3. NOTES + ISSUES/EXPORT (below the board) ── */}
+        <section
+          className="px-4 lg:px-3 pb-6 grid grid-cols-1 xl:grid-cols-2 gap-3"
+          data-testid="build-notes-export-section"
+        >
+          {/* Per-ply reviewer notes */}
+          <Card className="overflow-hidden" data-testid="card-build-notes-wrapper">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-card">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Reviewer notes
+                </div>
+                <h2 className="font-display text-base lg:text-lg font-semibold">
+                  Per-ply notes
+                </h2>
+              </div>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono" data-testid="badge-build-notes-count-header">
+                {Object.values(notes).filter((v) => v.trim() !== "").length} note{Object.values(notes).filter((v) => v.trim() !== "").length === 1 ? "" : "s"}
+              </Badge>
+            </div>
+            <div className="p-4" data-testid="build-note-container">
+              <BuildNoteEditor
+                currentNotePly={currentNotePly}
+                san={currentNotePly !== null ? syntheticGame.moves[currentNotePly] ?? null : null}
+                value={currentNoteValue}
+                setValue={setNoteForCurrent}
+                clear={clearNoteForCurrent}
+                total={Object.values(notes).filter((v) => v.trim() !== "").length}
+              />
+            </div>
+          </Card>
+
+          {/* Export bar */}
+          <div data-testid="build-export-block">
               <PanelHeader
                 eyebrow="Step 3 · export"
                 title="Generated PGN & issue report"
@@ -585,9 +616,8 @@ export default function BuildMode() {
                   {pgnText}
                 </pre>
               </Card>
-            </div>
-          </section>
-        </div>
+          </div>
+        </section>
       </main>
     </div>
   );

@@ -228,21 +228,32 @@ export default function VerifyMode() {
         />
       </aside>
 
-      {/* Main workbench: two-column side-by-side on lg+ — image pane (left, sticky/independent
-          scroll) and workspace pane (right, scrollable). On mobile/small screens, panes stack. */}
-      <main className="overflow-x-hidden min-w-0">
+      {/* Approved layout (do not regress — see FEATURES.md "Approved layout hierarchy"):
+          1. Top workbench: scoresheet image (left)  ‖  PGN/transcription/discrepancy (right) — proofreading zone.
+          2. Below the workbench: interactive chess board.
+          3. Below the board: per-ply reviewer notes editor.
+          The page itself scrolls; the top workbench is NOT sticky-locked to viewport height.
+          Board and notes must NEVER be stacked above the PGN/discrepancy table on desktop. */}
+      <main className="overflow-x-hidden min-w-0" data-testid="verify-main">
         <DisclaimerBanner />
 
-        <div
+        {game && (
+          <div className="px-4 lg:px-3 pt-3">
+            <GameSummaryInline game={game} report={report} />
+          </div>
+        )}
+
+        {/* ── 1. TOP WORKBENCH ── side-by-side image + PGN/transcription/discrepancy */}
+        <section
           className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:gap-3 lg:px-3 lg:py-3 lg:items-start"
           data-testid="verify-workbench"
         >
-          {/* LEFT: Scoresheet image — independently scrollable on desktop */}
-          <section
-            className="px-4 py-4 lg:p-0 lg:h-[calc(100vh-3.5rem-2.25rem)] lg:overflow-hidden lg:sticky lg:top-[calc(3.5rem+0.75rem)] flex flex-col"
+          {/* LEFT: scoresheet image */}
+          <div
+            className="px-4 py-4 lg:p-0 flex flex-col"
             data-testid="verify-image-pane"
           >
-            <Card className="overflow-hidden flex flex-col h-[480px] lg:h-full">
+            <Card className="overflow-hidden flex flex-col h-[520px] lg:h-[calc(100vh-3.5rem-2.5rem)] lg:sticky lg:top-[calc(3.5rem+0.75rem)]">
               <PanelHeader
                 eyebrow="Source A · scoresheet"
                 title="Handwritten scoresheet"
@@ -254,70 +265,13 @@ export default function VerifyMode() {
               />
               <ImageViewer src={imageUrl} caption={imageLabel} />
             </Card>
-          </section>
+          </div>
 
-          {/* RIGHT: workspace pane — board+notes (always visible top), transcription, comparison table */}
-          <section
-            className="px-4 py-4 lg:p-0 lg:h-[calc(100vh-3.5rem-2.25rem)] lg:overflow-y-auto flex flex-col gap-3 min-w-0"
+          {/* RIGHT: PGN / transcription / discrepancy table — the proofreading partner of the image */}
+          <div
+            className="px-4 py-4 lg:p-0 flex flex-col gap-3 min-w-0"
             data-testid="verify-workspace-pane"
           >
-            {game && <GameSummaryInline game={game} report={report} />}
-
-            {/* Board + per-ply notes — promoted to the top of the workspace pane so the
-                interactive board and note editor are immediately visible (no hunting / scrolling).
-                Collapsible for users who want more vertical room for the table, but default open. */}
-            <Card className="overflow-hidden shrink-0" data-testid="card-board-collapsible">
-              <button
-                type="button"
-                onClick={() => setBoardOpen((b) => !b)}
-                className="w-full flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-card text-left hover:bg-accent/40 transition-colors"
-                data-testid="button-toggle-board"
-                aria-expanded={boardOpen}
-              >
-                <div>
-                  <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                    Interactive board · per-ply notes
-                  </div>
-                  <h2 className="font-display text-base lg:text-lg font-semibold">
-                    Chess board &amp; reviewer notes
-                  </h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
-                    {game?.moves.length ?? 0} ply
-                  </Badge>
-                  <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono" data-testid="badge-notes-count-header">
-                    {Object.values(reviewerNotes).filter((v) => v.trim() !== "").length} note{Object.values(reviewerNotes).filter((v) => v.trim() !== "").length === 1 ? "" : "s"}
-                  </Badge>
-                  {boardOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-                </div>
-              </button>
-              {boardOpen && (
-                <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0">
-                  <div className="h-[380px] xl:h-[440px] flex flex-col" data-testid="verify-board-container">
-                    <ChessBoardViewer
-                      game={game}
-                      currentPly={boardPly}
-                      onPlyChange={setBoardPly}
-                      notedPlies={notedChipPlies}
-                    />
-                  </div>
-                  {game && (
-                    <div className="border-t xl:border-t-0 xl:border-l p-3" data-testid="verify-note-container">
-                      <NoteEditor
-                        game={game}
-                        currentNotePly={currentNotePly}
-                        noteValue={currentNotePly !== null ? reviewerNotes[currentNotePly] ?? "" : ""}
-                        setNote={setNoteForCurrentPly}
-                        clearNote={clearNoteForCurrentPly}
-                        reviewerNotes={reviewerNotes}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-
             <Card className="flex flex-col shrink-0" data-testid="card-transcription">
               <PanelHeader
                 eyebrow="Reviewer transcription"
@@ -339,7 +293,8 @@ export default function VerifyMode() {
               />
             </Card>
 
-            {/* Discrepancy / comparison table — primary review surface, kept above the fold next to the image */}
+            {/* Discrepancy / comparison table — kept inside the right pane next to the image,
+                NOT pushed below the board. */}
             <div data-testid="verify-comparison-block">
               <PanelHeader
                 eyebrow="Source B vs Source A"
@@ -409,9 +364,85 @@ export default function VerifyMode() {
                 compact={compact}
               />
             </div>
+          </div>
+        </section>
 
-          </section>
-        </div>
+        {/* ── 2. INTERACTIVE BOARD (below the top workbench, full width) ── */}
+        <section
+          className="px-4 lg:px-3 pb-3"
+          data-testid="verify-board-section"
+        >
+          <Card className="overflow-hidden" data-testid="card-board-collapsible">
+            <button
+              type="button"
+              onClick={() => setBoardOpen((b) => !b)}
+              className="w-full flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-card text-left hover:bg-accent/40 transition-colors"
+              data-testid="button-toggle-board"
+              aria-expanded={boardOpen}
+            >
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Interactive board
+                </div>
+                <h2 className="font-display text-base lg:text-lg font-semibold">
+                  Chess board
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
+                  {game?.moves.length ?? 0} ply
+                </Badge>
+                {boardOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              </div>
+            </button>
+            {boardOpen && (
+              <div className="h-[460px] lg:h-[520px] flex flex-col" data-testid="verify-board-container">
+                <ChessBoardViewer
+                  game={game}
+                  currentPly={boardPly}
+                  onPlyChange={setBoardPly}
+                  notedPlies={notedChipPlies}
+                />
+              </div>
+            )}
+          </Card>
+        </section>
+
+        {/* ── 3. PER-PLY REVIEWER NOTES (below the board) ── */}
+        <section
+          className="px-4 lg:px-3 pb-6"
+          data-testid="verify-notes-section"
+        >
+          <Card className="overflow-hidden" data-testid="card-board-notes-wrapper">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-card">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Reviewer notes
+                </div>
+                <h2 className="font-display text-base lg:text-lg font-semibold">
+                  Per-ply notes
+                </h2>
+              </div>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono" data-testid="badge-notes-count-header">
+                {Object.values(reviewerNotes).filter((v) => v.trim() !== "").length} note{Object.values(reviewerNotes).filter((v) => v.trim() !== "").length === 1 ? "" : "s"}
+              </Badge>
+            </div>
+            <div className="p-4" data-testid="verify-note-container">
+              {game ? (
+                <NoteEditor
+                  game={game}
+                  currentNotePly={currentNotePly}
+                  noteValue={currentNotePly !== null ? reviewerNotes[currentNotePly] ?? "" : ""}
+                  setNote={setNoteForCurrentPly}
+                  clearNote={clearNoteForCurrentPly}
+                  reviewerNotes={reviewerNotes}
+                />
+              ) : (
+                <div className="text-xs text-muted-foreground">Load a PGN game to enable per-ply notes.</div>
+              )}
+            </div>
+          </Card>
+        </section>
       </main>
     </div>
   );

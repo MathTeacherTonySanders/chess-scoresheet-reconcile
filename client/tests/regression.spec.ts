@@ -22,6 +22,13 @@ async function expectVisible(page: Page, testId: string) {
   await expect(page.locator(`[data-testid="${testId}"]`).first(), `missing test id: ${testId}`).toBeVisible();
 }
 
+/** Resolve the on-page top of a `data-testid` element via bounding box. */
+async function topOf(page: Page, testId: string): Promise<number> {
+  const box = await page.locator(`[data-testid="${testId}"]`).first().boundingBox();
+  if (!box) throw new Error(`no bounding box for [data-testid="${testId}"]`);
+  return box.y;
+}
+
 test.describe('Reconcile regression — Verify mode', () => {
   test('side-by-side panes, chess board, note editor, exports, and inline note helper are all present', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -76,6 +83,81 @@ test.describe('Reconcile regression — Verify mode', () => {
     await page.locator('[data-testid="textarea-transcription"]')
       .fill('1. e4 e5 -- reviewer note about move 1\n2. Nf3 Nc6');
     await expect(page.locator('[data-testid="button-extract-inline-notes"]')).toBeEnabled();
+  });
+});
+
+test.describe('Approved layout DOM order', () => {
+  test('Verify mode: workbench (image | PGN/discrepancy) sits above board which sits above notes', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+    await expectVisible(page, 'page-verify');
+
+    // Required sections present.
+    for (const id of [
+      'verify-workbench',
+      'verify-image-pane',
+      'verify-workspace-pane',
+      'verify-comparison-block',
+      'verify-board-section',
+      'verify-board-container',
+      'verify-notes-section',
+      'verify-note-container',
+    ]) {
+      await expectVisible(page, id);
+    }
+
+    // The discrepancy/PGN block lives INSIDE the right workspace pane, not below the board.
+    const workspacePaneHasComparison = await page
+      .locator('[data-testid="verify-workspace-pane"] [data-testid="verify-comparison-block"]')
+      .count();
+    expect(workspacePaneHasComparison, 'discrepancy table must live inside the right workspace pane').toBe(1);
+
+    // Vertical order: workbench < board section < notes section.
+    const yWorkbench = await topOf(page, 'verify-workbench');
+    const yBoard = await topOf(page, 'verify-board-section');
+    const yNotes = await topOf(page, 'verify-notes-section');
+    expect(yWorkbench).toBeLessThan(yBoard);
+    expect(yBoard).toBeLessThan(yNotes);
+
+    // The board must NOT sit above the discrepancy table (which is the regression we are guarding against).
+    const yComparison = await topOf(page, 'verify-comparison-block');
+    expect(yBoard, 'board section must be BELOW the discrepancy/PGN table on desktop').toBeGreaterThan(yComparison);
+  });
+
+  test('Build mode: workbench (images | accepted-line table) sits above board which sits above notes/exports', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+    await page.locator('[data-testid="button-mode-build"]').click({ force: true });
+    await expectVisible(page, 'page-build');
+
+    for (const id of [
+      'build-workbench',
+      'build-image-pane',
+      'build-workspace-pane',
+      'build-comparison-block',
+      'build-board-section',
+      'build-board-container',
+      'build-notes-export-section',
+      'build-note-container',
+      'build-export-block',
+    ]) {
+      await expectVisible(page, id);
+    }
+
+    // Accepted-line table lives inside the right workspace pane.
+    const workspacePaneHasComparison = await page
+      .locator('[data-testid="build-workspace-pane"] [data-testid="build-comparison-block"]')
+      .count();
+    expect(workspacePaneHasComparison, 'accepted-line table must live inside the right workspace pane').toBe(1);
+
+    const yWorkbench = await topOf(page, 'build-workbench');
+    const yBoard = await topOf(page, 'build-board-section');
+    const yNotesExport = await topOf(page, 'build-notes-export-section');
+    expect(yWorkbench).toBeLessThan(yBoard);
+    expect(yBoard).toBeLessThan(yNotesExport);
+
+    const yAccepted = await topOf(page, 'build-comparison-block');
+    expect(yBoard, 'board section must be BELOW the accepted-line table on desktop').toBeGreaterThan(yAccepted);
   });
 });
 
