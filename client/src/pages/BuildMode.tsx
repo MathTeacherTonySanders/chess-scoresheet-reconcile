@@ -46,18 +46,42 @@ import {
 
 type ActiveSheet = "white" | "black";
 type ImageLayoutMode = "toggle" | "split";
+type PageLayoutMode = "toggle" | "stack";
 type BuildReviewerNotes = Record<number, string>;
+
+interface SheetSource {
+  pages: string[];
+  label: string;
+  activePage: number;
+  sampleId?: string;
+}
+
+function makeSheetSource(sample: SampleSheet | null): SheetSource {
+  if (!sample) return { pages: [], label: "", activePage: 0 };
+  const pages = sample.pages && sample.pages.length > 0 ? sample.pages : [sample.url];
+  return { pages, label: sample.label, activePage: 0, sampleId: sample.id };
+}
+
+function makeUploadSource(url: string, label: string): SheetSource {
+  return { pages: [url], label, activePage: 0 };
+}
 
 export default function BuildMode() {
   const { toast } = useToast();
 
-  // ── Image sources ──
-  const [whiteImageUrl, setWhiteImageUrl] = useState<string | null>(SAMPLE_SHEETS[1]?.url ?? null);
-  const [whiteImageLabel, setWhiteImageLabel] = useState<string>(SAMPLE_SHEETS[1]?.label ?? "");
-  const [blackImageUrl, setBlackImageUrl] = useState<string | null>(SAMPLE_SHEETS[2]?.url ?? null);
-  const [blackImageLabel, setBlackImageLabel] = useState<string>(SAMPLE_SHEETS[2]?.label ?? "");
+  // ── Image sources (per-sheet, may be multi-page) ──
+  const [whiteSheet, setWhiteSheet] = useState<SheetSource>(() => makeSheetSource(SAMPLE_SHEETS[1] ?? null));
+  const [blackSheet, setBlackSheet] = useState<SheetSource>(() => makeSheetSource(SAMPLE_SHEETS[2] ?? null));
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>("white");
   const [imageLayout, setImageLayout] = useState<ImageLayoutMode>("toggle");
+  const [pageLayout, setPageLayout] = useState<PageLayoutMode>("toggle");
+
+  const activeSource = activeSheet === "white" ? whiteSheet : blackSheet;
+  const setActiveSource = activeSheet === "white" ? setWhiteSheet : setBlackSheet;
+  const whiteImageUrl = whiteSheet.pages[whiteSheet.activePage] ?? null;
+  const blackImageUrl = blackSheet.pages[blackSheet.activePage] ?? null;
+  const whiteImageLabel = whiteSheet.label;
+  const blackImageLabel = blackSheet.label;
 
   // ── Sheet transcriptions + accepted line ──
   const [whiteText, setWhiteText] = useState<string>("");
@@ -103,27 +127,34 @@ export default function BuildMode() {
 
   // ── Helpers ──
   function pickSampleForActive(sample: SampleSheet) {
-    if (activeSheet === "white") {
-      setWhiteImageUrl(sample.url);
-      setWhiteImageLabel(sample.label);
-    } else {
-      setBlackImageUrl(sample.url);
-      setBlackImageLabel(sample.label);
+    setActiveSource(makeSheetSource(sample));
+    // If the sample carries metadata (e.g. multi-page game with known
+    // names/ratings), seed the build-mode metadata fields. Existing
+    // user-entered values are preserved unless the sample explicitly
+    // overrides them.
+    if (sample.meta) {
+      const sm = sample.meta;
+      setMeta((prev) => ({
+        ...prev,
+        ...(sm.Board !== undefined ? { Board: sm.Board } : {}),
+        ...(sm.White !== undefined ? { White: sm.White } : {}),
+        ...(sm.Black !== undefined ? { Black: sm.Black } : {}),
+        ...(sm.WhiteElo !== undefined ? { WhiteElo: sm.WhiteElo } : {}),
+        ...(sm.BlackElo !== undefined ? { BlackElo: sm.BlackElo } : {}),
+        ...(sm.Result !== undefined ? { Result: sm.Result } : {}),
+      }));
     }
   }
   function uploadForActive(file: File) {
     const reader = new FileReader();
     reader.onload = () => {
       const url = reader.result as string;
-      if (activeSheet === "white") {
-        setWhiteImageUrl(url);
-        setWhiteImageLabel(file.name);
-      } else {
-        setBlackImageUrl(url);
-        setBlackImageLabel(file.name);
-      }
+      setActiveSource(makeUploadSource(url, file.name));
     };
     reader.readAsDataURL(file);
+  }
+  function setActivePage(idx: number) {
+    setActiveSource((prev) => ({ ...prev, activePage: Math.max(0, Math.min(prev.pages.length - 1, idx)) }));
   }
 
   function setAcceptedAt(ply: number, raw: string) {
@@ -231,8 +262,8 @@ export default function BuildMode() {
           setActiveSheet={setActiveSheet}
           whiteImageLabel={whiteImageLabel}
           blackImageLabel={blackImageLabel}
-          whiteImageUrl={whiteImageUrl}
-          blackImageUrl={blackImageUrl}
+          whiteSampleId={whiteSheet.sampleId}
+          blackSampleId={blackSheet.sampleId}
           uploadForActive={uploadForActive}
           pickSampleForActive={pickSampleForActive}
           meta={meta}
@@ -324,44 +355,140 @@ export default function BuildMode() {
               )}
             </div>
 
+            {/* Page toggle / stack — shown when the active sheet has more than one page (e.g. a two-page scoresheet for a long game). */}
+            {activeSource.pages.length > 1 && imageLayout === "toggle" && (
+              <div
+                className="flex flex-wrap items-center gap-2"
+                data-testid="build-page-controls"
+              >
+                <div
+                  className="inline-flex rounded-md border bg-card overflow-hidden"
+                  role="tablist"
+                  aria-label="Page layout"
+                >
+                  <button
+                    role="tab"
+                    aria-selected={pageLayout === "toggle"}
+                    onClick={() => setPageLayout("toggle")}
+                    className={
+                      "px-2.5 py-1 text-[11px] font-medium inline-flex items-center gap-1.5 transition-colors " +
+                      (pageLayout === "toggle"
+                        ? "bg-primary/10 text-foreground"
+                        : "text-muted-foreground hover:text-foreground")
+                    }
+                    data-testid="button-page-layout-toggle"
+                  >
+                    <Columns2 className="size-3.5" /> One page
+                  </button>
+                  <button
+                    role="tab"
+                    aria-selected={pageLayout === "stack"}
+                    onClick={() => setPageLayout("stack")}
+                    className={
+                      "px-2.5 py-1 text-[11px] font-medium inline-flex items-center gap-1.5 border-l transition-colors " +
+                      (pageLayout === "stack"
+                        ? "bg-primary/10 text-foreground"
+                        : "text-muted-foreground hover:text-foreground")
+                    }
+                    data-testid="button-page-layout-stack"
+                  >
+                    <Rows2 className="size-3.5" /> Stack pages
+                  </button>
+                </div>
+                {pageLayout === "toggle" && (
+                  <div
+                    className="inline-flex rounded-md border bg-card overflow-hidden"
+                    role="tablist"
+                    aria-label="Active page"
+                  >
+                    {activeSource.pages.map((_, i) => (
+                      <button
+                        key={i}
+                        role="tab"
+                        aria-selected={activeSource.activePage === i}
+                        onClick={() => setActivePage(i)}
+                        className={
+                          "px-3 py-1 text-[11px] font-medium font-mono tabular-nums transition-colors " +
+                          (i > 0 ? "border-l " : "") +
+                          (activeSource.activePage === i
+                            ? "bg-primary/10 text-foreground"
+                            : "text-muted-foreground hover:text-foreground")
+                        }
+                        data-testid={`button-page-${i + 1}`}
+                      >
+                        Page {i + 1}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {imageLayout === "toggle" ? (
-              <Card className="overflow-hidden flex flex-col flex-1 h-[480px] lg:h-auto" data-testid="card-build-image">
-                <PanelHeader
-                  eyebrow={activeSheet === "white" ? "White / Player A" : "Black / Player B"}
-                  title="Scoresheet image"
-                  right={
-                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
-                      Image
-                    </Badge>
-                  }
-                />
-                <ImageViewer
-                  src={activeSheet === "white" ? whiteImageUrl : blackImageUrl}
-                  caption={activeSheet === "white" ? whiteImageLabel : blackImageLabel}
-                />
-              </Card>
+              activeSource.pages.length > 1 && pageLayout === "stack" ? (
+                <div
+                  className="grid grid-rows-2 gap-2 flex-1 h-[600px] lg:h-auto min-h-0"
+                  data-testid="card-build-image-stack"
+                >
+                  {activeSource.pages.map((page, i) => (
+                    <Card
+                      key={i}
+                      className={`overflow-hidden flex flex-col min-h-0 ${
+                        activeSource.activePage === i ? "ring-1 ring-primary/40" : ""
+                      }`}
+                      data-testid={`card-build-image-page-${i + 1}`}
+                      onClick={() => setActivePage(i)}
+                    >
+                      <PanelHeader
+                        eyebrow={`${activeSheet === "white" ? "White / Player A" : "Black / Player B"} \u00b7 Page ${i + 1} of ${activeSource.pages.length}`}
+                        title="Scoresheet image"
+                        right={
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] uppercase tracking-wider font-mono"
+                          >
+                            pg {i + 1}/{activeSource.pages.length}
+                          </Badge>
+                        }
+                      />
+                      <ImageViewer
+                        src={page}
+                        caption={`${activeSource.label} \u2014 page ${i + 1}`}
+                      />
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Card className="overflow-hidden flex flex-col flex-1 h-[480px] lg:h-auto" data-testid="card-build-image">
+                  <PanelHeader
+                    eyebrow={
+                      activeSource.pages.length > 1
+                        ? `${activeSheet === "white" ? "White / Player A" : "Black / Player B"} \u00b7 Page ${activeSource.activePage + 1} of ${activeSource.pages.length}`
+                        : activeSheet === "white"
+                          ? "White / Player A"
+                          : "Black / Player B"
+                    }
+                    title="Scoresheet image"
+                    right={
+                      <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
+                        {activeSource.pages.length > 1
+                          ? `pg ${activeSource.activePage + 1}/${activeSource.pages.length}`
+                          : "Image"}
+                      </Badge>
+                    }
+                  />
+                  <ImageViewer
+                    src={activeSheet === "white" ? whiteImageUrl : blackImageUrl}
+                    caption={activeSheet === "white" ? whiteImageLabel : blackImageLabel}
+                  />
+                </Card>
+              )
             ) : (
               <div className="grid grid-rows-2 gap-2 flex-1 h-[600px] lg:h-auto min-h-0">
                 <Card
                   className={`overflow-hidden flex flex-col min-h-0 ${activeSheet === "white" ? "ring-1 ring-primary/40" : ""}`}
                   data-testid="card-build-image-white"
                   onClick={() => setActiveSheet("white")}
-                >
-                  <PanelHeader
-                    eyebrow="White / Player A"
-                    title="Scoresheet image"
-                    right={
-                      <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
-                        Image
-                      </Badge>
-                    }
-                  />
-                  <ImageViewer src={whiteImageUrl} caption={whiteImageLabel} />
-                </Card>
-                <Card
-                  className={`overflow-hidden flex flex-col min-h-0 ${activeSheet === "black" ? "ring-1 ring-primary/40" : ""}`}
-                  data-testid="card-build-image-black"
-                  onClick={() => setActiveSheet("black")}
                 >
                   <PanelHeader
                     eyebrow="Black / Player B"
@@ -646,8 +773,8 @@ function BuildSidebar({
   setActiveSheet,
   whiteImageLabel,
   blackImageLabel,
-  whiteImageUrl,
-  blackImageUrl,
+  whiteSampleId,
+  blackSampleId,
   uploadForActive,
   pickSampleForActive,
   meta,
@@ -657,8 +784,8 @@ function BuildSidebar({
   setActiveSheet: (s: ActiveSheet) => void;
   whiteImageLabel: string;
   blackImageLabel: string;
-  whiteImageUrl: string | null;
-  blackImageUrl: string | null;
+  whiteSampleId?: string;
+  blackSampleId?: string;
   uploadForActive: (f: File) => void;
   pickSampleForActive: (s: SampleSheet) => void;
   meta: BuildMeta;
@@ -734,8 +861,8 @@ function BuildSidebar({
           </div>
           {SAMPLE_SHEETS.map((s) => {
             const active =
-              (activeSheet === "white" && whiteImageUrl === s.url) ||
-              (activeSheet === "black" && blackImageUrl === s.url);
+              (activeSheet === "white" && whiteSampleId === s.id) ||
+              (activeSheet === "black" && blackSampleId === s.id);
             return (
               <button
                 key={s.id}

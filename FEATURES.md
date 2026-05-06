@@ -149,8 +149,37 @@ See `client/tests/regression.spec.ts` for the Playwright smoke test. It asserts 
 
 ---
 
+## Multi-page scoresheet samples (Build mode)
+
+Some built-in Build PGN samples are **multi-page** — a single game whose move list runs across two scoresheet pages because it exceeded the 50-move single-sheet capacity. Currently:
+
+- `Bd 1 — Jeff Martin (1980) vs Stephen Jablon (2033), 0-1, pg 1/2` (sample id `7`, button `button-build-sample-7`).
+
+When a multi-page sample is assigned to the active sheet, the image pane MUST expose:
+
+- A **Page 1 / Page 2 / …** toggle (`button-page-1`, `button-page-2`, …) so the reviewer can flip between pages without losing the active White/Black sheet selection.
+- A **One page / Stack pages** layout switch (`button-page-layout-toggle`, `button-page-layout-stack`). Stack mode renders all pages of the active sheet vertically (`card-build-image-stack`, `card-build-image-page-1`, `card-build-image-page-2`, …) for side-by-side reading without losing context.
+- A page badge (`pg N/M`) and an eyebrow showing `Page N of M` so the reviewer always knows which page is on screen.
+
+The page controls are nested inside the existing **left** column of the build workbench and MUST NOT alter the approved layout hierarchy (workbench → board → notes/exports). The existing **White / Black** sheet toggle and the existing **Toggle / Split** image layout for two-player sheet pairs continue to work unchanged — multi-page is orthogonal to the per-sheet selector. Single-page samples render exactly as before with no page controls visible.
+
+Multi-page samples MAY also carry pre-filled `meta` (Board, White, Black, WhiteElo, BlackElo, Result). Selecting such a sample populates the corresponding metadata fields in the sidebar; Date/Site/Event remain editable and are not overwritten.
+
+### Regression test for page toggles
+
+1. Open Build mode at desktop width.
+2. Click the multi-page sample in the left rail (e.g. `Bd 1 — Jeff Martin… pg 1/2`).
+3. Verify that the page-controls row appears with `Page 1` and `Page 2` buttons and a `One page / Stack pages` switch.
+4. Verify metadata is populated: White = `Jeff Martin`, Black = `Stephen Jablon`, WhiteElo = `1980`, BlackElo = `2033`, Board = `1`, Result = `0-1`.
+5. Click `Page 2` → the image swaps to the second page; the badge reads `pg 2/2`.
+6. Click `Stack pages` → both pages render vertically inside the left column; the active page is ring-highlighted; clicking either card sets it active.
+7. Click `One page` then switch sheets to Black and pick a different (single-page) sample → page controls disappear (no multi-page state).
+8. Click `Split` (image layout) → White / Black sheet cards both render (single-page behaviour). Click `Toggle` to return.
+9. Seed an accepted line → the chess board below the workbench updates with the played plies.
+10. Confirm DOM order is still: `build-workbench` → `build-board-section` → `build-notes-export-section`.
+
 ## Known intentional non-features
 
 - No data persistence between sessions (sandbox limitation).
-- No OCR — handwriting recognition is not part of this app.
+- No OCR — handwriting recognition is not part of this app. Multi-page samples are loaded as static JPEGs; the user still transcribes the moves manually.
 - No engine analysis or evaluation bar.
