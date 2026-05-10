@@ -20,6 +20,18 @@ const PIECE_GLYPH: Record<string, string> = {
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const RANKS = [8, 7, 6, 5, 4, 3, 2, 1];
 
+/**
+ * Which workflow is driving this board.
+ *
+ * - `verify` (default): the board reflects a previously-imported PGN game.
+ *   Empty state nudges the reviewer to pick a PGN. Disclaimer references the
+ *   selected PGN.
+ * - `build`: the board is driven by the accepted/canonical line currently
+ *   being constructed in Build PGN mode. Empty state explains how to seed
+ *   accepted moves; disclaimer references the accepted line, not a PGN.
+ */
+export type BoardMode = "verify" | "build";
+
 interface ChessBoardViewerProps {
   game: PgnGame | null;
   /** Controlled current ply (number of half-moves played from start). 0 = start position. */
@@ -30,7 +42,14 @@ interface ChessBoardViewerProps {
    * have reviewer notes attached. Move chips for these plies render a dot.
    */
   notedPlies?: Set<number>;
-  /** Optional click target for jumping; useful for keyboard or external triggers. */
+  /**
+   * Workflow context. Defaults to `verify`. In `build` mode the empty-state
+   * copy, board title, and disclaimer reference the accepted line being
+   * constructed rather than a completed PGN. The board is driven by whatever
+   * `game` is passed (Build mode synthesizes one from accepted moves) and
+   * never asks the reviewer to "pick a PGN game".
+   */
+  mode?: BoardMode;
 }
 
 interface BoardSnapshot {
@@ -106,6 +125,7 @@ export function ChessBoardViewer({
   currentPly,
   onPlyChange,
   notedPlies,
+  mode = "verify",
 }: ChessBoardViewerProps) {
   const moves = game?.moves ?? [];
   const snapshots = useMemo(() => buildSnapshots(moves), [moves]);
@@ -144,8 +164,25 @@ export function ChessBoardViewer({
   }, [snapshots]);
 
   if (!game) {
+    // Build mode never sends `null` (it always synthesizes a PgnGame from the
+    // accepted line, even when empty), but we keep a defensive empty state
+    // here so the wording stays correct if a future caller does pass null.
+    if (mode === "build") {
+      return (
+        <div
+          className="flex flex-col h-full items-center justify-center gap-1 p-6 text-center text-sm text-muted-foreground"
+          data-testid="board-empty"
+        >
+          <div className="font-medium text-foreground">Accepted-line board</div>
+          <p>Add accepted moves to display and replay the position.</p>
+        </div>
+      );
+    }
     return (
-      <div className="flex flex-col h-full items-center justify-center p-6 text-sm text-muted-foreground" data-testid="board-empty">
+      <div
+        className="flex flex-col h-full items-center justify-center p-6 text-sm text-muted-foreground"
+        data-testid="board-empty"
+      >
         Pick a PGN game to display the board.
       </div>
     );
@@ -300,10 +337,17 @@ export function ChessBoardViewer({
         </div>
       </div>
 
-        {/* PGN illegal-warning, if any */}
+        {/* Illegal-warning, if any. In Build mode this refers to the accepted
+            line; in Verify mode it refers to the imported PGN. We do NOT claim
+            any specific source is wrong — just that the line stops being
+            legal at this ply. */}
         {validation.firstIllegalAt !== null && (
-          <div className="mx-3 mb-2 text-[11px] rounded-md border border-rose-500/30 bg-rose-50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-200 px-2 py-1.5" data-testid="board-pgn-illegal-warning">
-            PGN goes illegal at ply {validation.firstIllegalAt + 1}. Board can only be replayed up to ply {maxPly}.
+          <div
+            className="mx-3 mb-2 text-[11px] rounded-md border border-rose-500/30 bg-rose-50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-200 px-2 py-1.5"
+            data-testid={mode === "build" ? "board-accepted-illegal-warning" : "board-pgn-illegal-warning"}
+          >
+            {mode === "build" ? "Accepted line" : "PGN"} goes illegal at ply{" "}
+            {validation.firstIllegalAt + 1}. Board can only be replayed up to ply {maxPly}.
           </div>
         )}
       </div>
@@ -354,7 +398,9 @@ export function ChessBoardViewer({
         className="border-t px-3 py-1.5 text-[10px] text-muted-foreground bg-card"
         data-testid="board-disclaimer"
       >
-        Board shows the selected PGN state. It does not prove the PGN is correct — see the discrepancy table for divergence vs. the scoresheet.
+        {mode === "build"
+          ? "Board shows the accepted line being constructed. Step through to confirm each accepted move is the position you intended."
+          : "Board shows the selected PGN state. It does not prove the PGN is correct — see the discrepancy table for divergence vs. the scoresheet."}
       </div>
       </div>
     </div>

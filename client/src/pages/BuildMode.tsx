@@ -632,11 +632,16 @@ export default function BuildMode() {
             >
               <div>
                 <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Accepted line
+                  Driven by accepted moves
                 </div>
                 <h2 className="font-display text-base lg:text-lg font-semibold">
-                  Chess board
+                  Accepted-line board
                 </h2>
+                <div className="text-[11px] text-muted-foreground mt-0.5">
+                  {syntheticGame.moves.length === 0
+                    ? "Add accepted moves to display and replay the position."
+                    : "Step through accepted plies to confirm the position."}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
@@ -647,11 +652,20 @@ export default function BuildMode() {
             </button>
             {boardOpen && (
               <div className="h-[460px] lg:h-[520px] flex flex-col" data-testid="build-board-container">
+                {/*
+                  Build mode board is driven by the accepted/canonical line,
+                  NOT by any imported PGN. We always pass the synthetic game
+                  (which is well-formed even when zero moves have been
+                  accepted yet) so the board renders the start position and
+                  steps through accepted plies as they are added — instead of
+                  prompting the reviewer to pick a PGN game.
+                */}
                 <ChessBoardViewer
-                  game={syntheticGame.moves.length > 0 ? syntheticGame : null}
+                  game={syntheticGame}
                   currentPly={boardPly}
                   onPlyChange={setBoardPly}
                   notedPlies={notedChipPlies}
+                  mode="build"
                 />
               </div>
             )}

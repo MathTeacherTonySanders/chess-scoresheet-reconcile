@@ -402,6 +402,7 @@ export default function VerifyMode() {
                   currentPly={boardPly}
                   onPlyChange={setBoardPly}
                   notedPlies={notedChipPlies}
+                  mode="verify"
                 />
               </div>
             )}
