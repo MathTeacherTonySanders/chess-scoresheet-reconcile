@@ -19,11 +19,12 @@ import {
   XCircle,
   CircleSlash,
   Wand2,
-  Image as ImageIcon,
   ChevronDown,
   ChevronUp,
   Rows2,
   Columns2,
+  Save,
+  FolderOpen,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ImageViewer } from "@/components/ImageViewer";
@@ -33,8 +34,7 @@ import { SAMPLE_SHEETS, type SampleSheet } from "@/lib/samples";
 import {
   DEFAULT_BUILD_META,
   computeBuildRows,
-  seedAcceptedFromSheet,
-  seedAcceptedFromBoth,
+  seedAcceptedFromWorking,
   buildPgnText,
   buildIssueReportMarkdown,
   buildIssueReportCsv,
@@ -43,6 +43,13 @@ import {
   type BuildMeta,
   type BuildRow,
 } from "@/lib/buildPgn";
+import {
+  createSessionEnvelope,
+  parseSessionJson,
+  suggestSessionFilename,
+  SessionImportError,
+  type BuildSessionState,
+} from "@/lib/session";
 
 type ActiveSheet = "white" | "black";
 type ImageLayoutMode = "toggle" | "split";
@@ -83,9 +90,12 @@ export default function BuildMode() {
   const whiteImageLabel = whiteSheet.label;
   const blackImageLabel = blackSheet.label;
 
-  // ── Sheet transcriptions + accepted line ──
-  const [whiteText, setWhiteText] = useState<string>("");
-  const [blackText, setBlackText] = useState<string>("");
+  // ── Single working transcription + accepted line ──
+  // The user visually compares the two scoresheet images and enters the
+  // decided move sequence into ONE working transcription window. Previously
+  // this was a White transcription + Black transcription pair; that was
+  // removed because the user never transcribed two separate sheets.
+  const [workingText, setWorkingText] = useState<string>("");
   const [accepted, setAccepted] = useState<Record<number, AcceptedEntry>>({});
 
   // ── Metadata + reviewer notes ──
@@ -97,9 +107,12 @@ export default function BuildMode() {
   const [boardOpen, setBoardOpen] = useState<boolean>(true);
   const [transcriptionsOpen, setTranscriptionsOpen] = useState<boolean>(true);
 
+  // The row engine still walks plies against chess.js; we pass the single
+  // working transcription in the `whiteText` slot and leave `blackText`
+  // empty. The Black column is no longer rendered in the table.
   const compute = useMemo(
-    () => computeBuildRows({ meta, whiteText, blackText, accepted }),
-    [meta, whiteText, blackText, accepted]
+    () => computeBuildRows({ meta, whiteText: workingText, blackText: "", accepted }),
+    [meta, workingText, accepted]
   );
   const rows = compute.rows;
 
@@ -164,13 +177,9 @@ export default function BuildMode() {
       return next;
     });
   }
-  function useWhiteAt(row: BuildRow) {
+  function useWorkingAt(row: BuildRow) {
     if (!row.white || row.white.kind !== "move") return;
-    setAccepted((prev) => ({ ...prev, [row.ply]: { raw: row.white!.raw, source: "white" } }));
-  }
-  function useBlackAt(row: BuildRow) {
-    if (!row.black || row.black.kind !== "move") return;
-    setAccepted((prev) => ({ ...prev, [row.ply]: { raw: row.black!.raw, source: "black" } }));
+    setAccepted((prev) => ({ ...prev, [row.ply]: { raw: row.white!.raw, source: "working" } }));
   }
   function clearAcceptedAt(ply: number) {
     setAccepted((prev) => {
@@ -180,19 +189,11 @@ export default function BuildMode() {
     });
   }
 
-  function seedFromWhite() {
-    setAccepted(seedAcceptedFromSheet(whiteText, "white"));
-    toast({ title: "Seeded from White sheet", description: "Accepted line copied from White-side transcription." });
-  }
-  function seedFromBlack() {
-    setAccepted(seedAcceptedFromSheet(blackText, "black"));
-    toast({ title: "Seeded from Black sheet", description: "Accepted line copied from Black-side transcription." });
-  }
-  function seedFromBoth() {
-    setAccepted(seedAcceptedFromBoth(whiteText, blackText));
+  function seedFromWorking() {
+    setAccepted(seedAcceptedFromWorking(workingText));
     toast({
-      title: "Seeded from both sheets",
-      description: "Where both sheets agree, the move was accepted; conflicts left blank for review.",
+      title: "Seeded accepted line",
+      description: "Accepted line copied from your working transcription.",
     });
   }
   function clearAccepted() {
@@ -217,6 +218,111 @@ export default function BuildMode() {
     URL.revokeObjectURL(url);
   }
   const exportSlug = `build-${(meta.White || "white").replace(/\W+/g, "_")}-vs-${(meta.Black || "black").replace(/\W+/g, "_")}`;
+
+  // ── Session export / import (file-based persistence) ──
+  // The user explicitly asked for a way to save a partially completed Build
+  // task to disk and resume it later. NO localStorage/sessionStorage/cookies
+  // are used; the file lives only on the user's local machine.
+  const sessionInputRef = useRef<HTMLInputElement>(null);
+
+  function snapshotBuildState(): BuildSessionState {
+    return {
+      activeSampleId: whiteSheet.sampleId ?? blackSheet.sampleId ?? null,
+      activePage:
+        activeSheet === "white" ? whiteSheet.activePage : blackSheet.activePage,
+      imageLayout,
+      pageLayout,
+      activeSheet,
+      meta,
+      workingText,
+      accepted,
+      notes,
+      boardPly,
+    };
+  }
+
+  function exportSession() {
+    const env = createSessionEnvelope(snapshotBuildState());
+    const json = JSON.stringify(env, null, 2);
+    const filename = suggestSessionFilename(env.build ?? null);
+    downloadFile(filename, json, "application/json");
+    toast({
+      title: "Session exported",
+      description: `Saved partial Build task to ${filename}.`,
+    });
+  }
+
+  async function copySessionJson() {
+    const env = createSessionEnvelope(snapshotBuildState());
+    const json = JSON.stringify(env, null, 2);
+    try {
+      await navigator.clipboard.writeText(json);
+      toast({ title: "Session JSON copied", description: "Session contents copied to clipboard." });
+    } catch {
+      toast({ title: "Copy failed", description: "Use Export session to download a file instead." });
+    }
+  }
+
+  function applyImportedBuild(build: BuildSessionState) {
+    // Try to restore the sample on whichever side the session said was active.
+    const sample = build.activeSampleId
+      ? SAMPLE_SHEETS.find((s) => s.id === build.activeSampleId) ?? null
+      : null;
+    if (sample) {
+      const restored: SheetSource = {
+        ...makeSheetSource(sample),
+        activePage: Math.min(
+          Math.max(0, build.activePage),
+          Math.max(0, (sample.pages?.length ?? 1) - 1)
+        ),
+      };
+      if (build.activeSheet === "black") {
+        setBlackSheet(restored);
+      } else {
+        setWhiteSheet(restored);
+      }
+    }
+    setActiveSheet(build.activeSheet);
+    setImageLayout(build.imageLayout);
+    setPageLayout(build.pageLayout);
+    setMeta(build.meta);
+    setWorkingText(build.workingText);
+    setAccepted(build.accepted);
+    setNotes(build.notes);
+    setBoardPly(Math.max(0, build.boardPly));
+  }
+
+  function importSessionFromFile(file: File) {
+    const reader = new FileReader();
+    reader.onerror = () => {
+      toast({ title: "Import failed", description: "Could not read the file." });
+    };
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      try {
+        const env = parseSessionJson(text);
+        if (!env.build) {
+          toast({
+            title: "Import failed",
+            description: "Session file has no Build mode state to restore.",
+          });
+          return;
+        }
+        applyImportedBuild(env.build);
+        toast({
+          title: "Session imported",
+          description: `Restored Build task from ${file.name}.`,
+        });
+      } catch (err) {
+        const msg =
+          err instanceof SessionImportError
+            ? err.message
+            : "Could not import session file.";
+        toast({ title: "Import failed", description: msg });
+      }
+    };
+    reader.readAsText(file);
+  }
 
   // Note for currently-selected accepted ply
   const currentNotePly = boardPly > 0 ? boardPly - 1 : null;
@@ -511,7 +617,11 @@ export default function BuildMode() {
             className="px-4 py-4 lg:p-0 flex flex-col gap-3 min-w-0"
             data-testid="build-workspace-pane"
           >
-            {/* Transcriptions: collapsible to keep accepted-line table above the fold once filled in */}
+            {/* Working transcription: single input where the user enters the
+                move sequence they decided from visually comparing the two
+                scoresheet images. Previously two transcriptions (White and
+                Black) lived here; that was removed because the user never
+                transcribed two separate sheets. */}
             <Card className="overflow-hidden shrink-0" data-testid="card-build-transcriptions">
               <button
                 type="button"
@@ -524,36 +634,22 @@ export default function BuildMode() {
                   <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                     Step 1 · transcribe
                   </div>
-                  <h2 className="font-display text-sm lg:text-base font-semibold">Sheet transcriptions</h2>
+                  <h2 className="font-display text-sm lg:text-base font-semibold">
+                    Working transcription
+                  </h2>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
-                    W {tokenCount(whiteText)} · B {tokenCount(blackText)} ply
+                    {tokenCount(workingText)} ply
                   </Badge>
                   {transcriptionsOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
                 </div>
               </button>
               {transcriptionsOpen && (
-                <div className="grid grid-cols-1 xl:grid-cols-2">
-                  <TranscriptionPane
-                    sideLabel="White / A"
-                    tone="white"
-                    text={whiteText}
-                    setText={setWhiteText}
-                    isActive={activeSheet === "white"}
-                    activate={() => setActiveSheet("white")}
-                  />
-                  <div className="border-t xl:border-t-0 xl:border-l">
-                    <TranscriptionPane
-                      sideLabel="Black / B"
-                      tone="black"
-                      text={blackText}
-                      setText={setBlackText}
-                      isActive={activeSheet === "black"}
-                      activate={() => setActiveSheet("black")}
-                    />
-                  </div>
-                </div>
+                <WorkingTranscriptionPane
+                  text={workingText}
+                  setText={setWorkingText}
+                />
               )}
             </Card>
 
@@ -567,26 +663,10 @@ export default function BuildMode() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={seedFromWhite}
-                      data-testid="button-seed-white"
+                      onClick={seedFromWorking}
+                      data-testid="button-seed-accepted"
                     >
-                      <Wand2 className="size-3.5 mr-1.5" /> Seed: White
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={seedFromBlack}
-                      data-testid="button-seed-black"
-                    >
-                      <Wand2 className="size-3.5 mr-1.5" /> Seed: Black
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={seedFromBoth}
-                      data-testid="button-seed-both"
-                    >
-                      <Wand2 className="size-3.5 mr-1.5" /> Prefer agree
+                      <Wand2 className="size-3.5 mr-1.5" /> Seed accepted line
                     </Button>
                     <Button
                       variant="outline"
@@ -607,8 +687,7 @@ export default function BuildMode() {
                 activePly={boardPly > 0 ? boardPly - 1 : null}
                 onJumpToPly={(ply) => setBoardPly(ply + 1)}
                 onSetAccepted={setAcceptedAt}
-                onUseWhite={useWhiteAt}
-                onUseBlack={useBlackAt}
+                onUseWorking={useWorkingAt}
                 onClearAccepted={clearAcceptedAt}
                 notes={notes}
               />
@@ -704,8 +783,65 @@ export default function BuildMode() {
             </div>
           </Card>
 
-          {/* Export bar */}
-          <div data-testid="build-export-block">
+          {/* Export bar + session save/resume */}
+          <div data-testid="build-export-block" className="flex flex-col gap-3">
+              {/* Session export / import — file-based persistence so a
+                  partially completed Build task can be resumed later. */}
+              <div data-testid="build-session-block">
+                <input
+                  ref={sessionInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) importSessionFromFile(f);
+                    // Reset so the same file can be re-selected later.
+                    e.target.value = "";
+                  }}
+                  data-testid="input-session-import"
+                />
+                <PanelHeader
+                  eyebrow="Save & resume"
+                  title="Build session"
+                  right={
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={exportSession}
+                        data-testid="button-export-session"
+                      >
+                        <Save className="size-3.5 mr-1.5" /> Export session
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => sessionInputRef.current?.click()}
+                        data-testid="button-import-session"
+                      >
+                        <FolderOpen className="size-3.5 mr-1.5" /> Import session
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={copySessionJson}
+                        data-testid="button-copy-session"
+                      >
+                        <Copy className="size-3.5 mr-1.5" /> Copy JSON
+                      </Button>
+                    </div>
+                  }
+                  standalone
+                />
+                <Card className="px-3 py-2 text-[11px] text-muted-foreground" data-testid="text-session-help">
+                  Saves your partial proofreading / Build task — selected sample, page
+                  layout, metadata, working transcription, accepted line, per-ply notes,
+                  current ply — to a local JSON file (no browser storage). Import the
+                  same file later to resume where you left off.
+                </Card>
+              </div>
+
               <PanelHeader
                 eyebrow="Step 3 · export"
                 title="Generated PGN & issue report"
@@ -772,9 +908,8 @@ function BuildBanner() {
       <Info className="size-3.5 shrink-0 mt-0.5 text-sky-700 dark:text-sky-300" />
       <p className="text-sky-900/90 dark:text-sky-100/90">
         <strong>Build PGN — no OCR.</strong> Use this when there is no PGN source (for example, idChess
-        failed). Transcribe one or two scoresheets into the panels; the app reconciles them
-        into a legal accepted line, validates it with chess.js, and lets you export the resulting
-        PGN. The reviewer decides which sheet is correct when they disagree.
+        failed). Visually compare the two scoresheet images and enter the decided move sequence into
+        the working transcription; the app validates it with chess.js and exports a legal PGN.
       </p>
     </div>
   );
@@ -983,60 +1118,36 @@ function SidebarSectionHeader({ step, title, subtitle }: { step: string; title: 
   );
 }
 
-/* ── Transcription pane (text-only — image lives in left workbench column now) ── */
+/* ── Working transcription pane ──
+   ONE textarea where the reviewer enters the move sequence they decided by
+   visually comparing the two scoresheet images. There is intentionally no
+   per-player split here — the user does not transcribe two sheets. */
 
-function TranscriptionPane({
-  sideLabel,
-  tone,
+function WorkingTranscriptionPane({
   text,
   setText,
-  isActive,
-  activate,
 }: {
-  sideLabel: string;
-  tone: "white" | "black";
   text: string;
   setText: (v: string) => void;
-  isActive: boolean;
-  activate: () => void;
 }) {
-  const accent =
-    tone === "white"
-      ? "border-l-2 border-l-amber-400/60"
-      : "border-l-2 border-l-zinc-400/60 dark:border-l-zinc-500/60";
   return (
-    <div className={`flex flex-col ${accent}`} data-testid={`sheet-panel-${tone}`} onFocus={activate}>
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b bg-card/60">
-        <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            {sideLabel} transcription
-          </div>
-          <div className="text-xs text-muted-foreground">Type or paste moves</div>
+    <div className="flex flex-col" data-testid="sheet-panel-working">
+      <div className="px-3 py-2 border-b bg-card/60">
+        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          Scoresheet transcription
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {!isActive && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={activate}
-              className="h-6 text-[10px] px-1.5"
-              data-testid={`button-activate-${tone}`}
-            >
-              <ImageIcon className="size-3 mr-1" /> Show
-            </Button>
-          )}
-          <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-mono">
-            {tokenCount(text)} ply
-          </Badge>
-        </div>
+        <p className="text-[11px] text-muted-foreground mt-0.5" data-testid="helper-working-transcription">
+          Enter the move sequence you determine from the scoresheets. Use both
+          player sheets visually when resolving illegible or conflicting moves.
+        </p>
       </div>
       <Textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        rows={6}
+        rows={10}
         className="text-xs font-mono resize-y border-0 rounded-none focus-visible:ring-0"
         placeholder={`1. e4 e5\n2. Nf3 Nc6\n3. Bb5 a6\n…\n\nUse ? or [illegible] for unreadable plies.`}
-        data-testid={`textarea-sheet-${tone}`}
+        data-testid="textarea-working-transcription"
       />
     </div>
   );
@@ -1060,16 +1171,18 @@ function BuildSummaryStrip({
 }: {
   totals: ReturnType<typeof computeBuildRows>["totals"];
 }) {
+  // The dual-sheet "conflicts" tally no longer applies (single working
+  // transcription). The remaining statuses describe per-ply legality of the
+  // accepted line.
   const items: { label: string; value: number; cls: string; testId: string }[] = [
     { label: "legal", value: totals.legal, cls: "text-emerald-700 dark:text-emerald-400", testId: "stat-legal" },
-    { label: "conflicts", value: totals.conflicts, cls: "text-rose-700 dark:text-rose-400", testId: "stat-conflicts" },
     { label: "illegible", value: totals.illegible, cls: "text-amber-700 dark:text-amber-400", testId: "stat-build-illegible" },
     { label: "illegal", value: totals.illegal, cls: "text-rose-700 dark:text-rose-400", testId: "stat-build-illegal" },
     { label: "blocked", value: totals.blocked, cls: "text-violet-700 dark:text-violet-300", testId: "stat-blocked" },
     { label: "blank", value: totals.blank, cls: "text-blue-700 dark:text-blue-300", testId: "stat-blank" },
   ];
   return (
-    <div className="border rounded-md mb-2 bg-card divide-x grid grid-cols-3 sm:grid-cols-6 overflow-hidden" data-testid="strip-build-summary">
+    <div className="border rounded-md mb-2 bg-card divide-x grid grid-cols-3 sm:grid-cols-5 overflow-hidden" data-testid="strip-build-summary">
       {items.map((it) => (
         <div key={it.label} className="px-3 py-1.5 flex flex-col gap-0.5" data-testid={it.testId}>
           <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{it.label}</span>
@@ -1085,8 +1198,7 @@ function BuildTable({
   activePly,
   onJumpToPly,
   onSetAccepted,
-  onUseWhite,
-  onUseBlack,
+  onUseWorking,
   onClearAccepted,
   notes,
 }: {
@@ -1094,8 +1206,7 @@ function BuildTable({
   activePly: number | null;
   onJumpToPly: (ply: number) => void;
   onSetAccepted: (ply: number, raw: string) => void;
-  onUseWhite: (row: BuildRow) => void;
-  onUseBlack: (row: BuildRow) => void;
+  onUseWorking: (row: BuildRow) => void;
   onClearAccepted: (ply: number) => void;
   notes: BuildReviewerNotes;
 }) {
@@ -1107,8 +1218,8 @@ function BuildTable({
           <div>
             <div className="font-medium text-foreground">No moves yet</div>
             <p className="mt-1">
-              Transcribe moves into the White and/or Black sheet panels above, then click a{" "}
-              <span className="font-mono">Seed</span> button to populate the accepted line.
+              Enter moves into the working transcription above, then click{" "}
+              <span className="font-mono">Seed accepted line</span> to populate this table.
             </p>
           </div>
         </div>
@@ -1123,11 +1234,10 @@ function BuildTable({
             <tr>
               <th className="text-left px-3 py-2 w-12">#</th>
               <th className="text-left px-2 py-2 w-14">Side</th>
-              <th className="text-left px-2 py-2">White sheet</th>
-              <th className="text-left px-2 py-2">Black sheet</th>
+              <th className="text-left px-2 py-2">Transcription</th>
               <th className="text-left px-2 py-2 min-w-[160px]">Accepted</th>
               <th className="text-left px-2 py-2 w-[160px]">Status</th>
-              <th className="text-right px-3 py-2 w-[160px]">Actions</th>
+              <th className="text-right px-3 py-2 w-[110px]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1150,11 +1260,8 @@ function BuildTable({
                   <td className="px-2 py-1.5 font-mono text-muted-foreground">
                     {r.side === "White" ? "w" : "b"}
                   </td>
-                  <td className={`px-2 py-1.5 font-mono ${cellTone(r.white?.kind, r.whiteAgrees)}`}>
+                  <td className={`px-2 py-1.5 font-mono ${cellTone(r.white?.kind, r.whiteAgrees)}`} data-testid={`cell-working-${r.ply}`}>
                     {r.white ? formatPly(r.white) : <span className="text-muted-foreground/50">—</span>}
-                  </td>
-                  <td className={`px-2 py-1.5 font-mono ${cellTone(r.black?.kind, r.blackAgrees)}`}>
-                    {r.black ? formatPly(r.black) : <span className="text-muted-foreground/50">—</span>}
                   </td>
                   <td className="px-2 py-1.5">
                     <input
@@ -1186,20 +1293,10 @@ function BuildTable({
                         size="sm"
                         className="h-6 px-1.5 text-[10px]"
                         disabled={!r.white || r.white.kind !== "move"}
-                        onClick={() => onUseWhite(r)}
-                        data-testid={`button-use-white-${r.ply}`}
+                        onClick={() => onUseWorking(r)}
+                        data-testid={`button-use-working-${r.ply}`}
                       >
-                        Use W
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 px-1.5 text-[10px]"
-                        disabled={!r.black || r.black.kind !== "move"}
-                        onClick={() => onUseBlack(r)}
-                        data-testid={`button-use-black-${r.ply}`}
-                      >
-                        Use B
+                        Use
                       </Button>
                       <Button
                         variant="ghost"

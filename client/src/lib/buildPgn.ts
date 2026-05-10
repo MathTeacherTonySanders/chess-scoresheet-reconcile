@@ -47,7 +47,7 @@ export function tokenizeBuildSheet(text: string): BuildPly[] {
   return out;
 }
 
-export type AcceptedSource = "blank" | "white" | "black" | "manual";
+export type AcceptedSource = "blank" | "white" | "black" | "manual" | "working";
 
 export interface AcceptedEntry {
   /** Raw SAN as the reviewer accepted it (or blank). */
@@ -355,6 +355,29 @@ export function seedAcceptedFromSheet(
       out[i] = { raw: p.raw, source: sheet };
     } else {
       out[i] = { raw: "", source: sheet };
+    }
+  }
+  return out;
+}
+
+/**
+ * Seed accepted entries from the single working transcription. Illegible /
+ * blank tokens preserve the reviewer's marker so the row continues to surface
+ * the gap.
+ */
+export function seedAcceptedFromWorking(
+  text: string
+): Record<number, AcceptedEntry> {
+  const plies = tokenizeBuildSheet(text);
+  const out: Record<number, AcceptedEntry> = {};
+  for (let i = 0; i < plies.length; i++) {
+    const p = plies[i];
+    if (p.kind === "move") {
+      out[i] = { raw: p.raw, source: "working" };
+    } else if (p.kind === "illegible") {
+      out[i] = { raw: p.raw, source: "working" };
+    } else {
+      out[i] = { raw: "", source: "working" };
     }
   }
   return out;

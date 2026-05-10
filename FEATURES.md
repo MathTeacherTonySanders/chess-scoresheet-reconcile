@@ -110,13 +110,22 @@ Panes may stack vertically. The DOM order is preserved (workbench first, board s
 - [ ] Exports: Copy Markdown (`button-copy-markdown`), CSV download (`button-download-csv`), Markdown download (`button-download-markdown`). Reviewer notes MUST be included in MD and CSV outputs.
 
 ### 7. Build mode accepted-line workflow
-- [ ] Per-ply rows comparing White and Black transcriptions.
-- [ ] Accept-from-White / Accept-from-Black / Use-typed for each row.
-- [ ] Seed buttons: Seed White, Seed Black, Prefer agree (`button-seed-white`, `button-seed-black`, `button-seed-both`).
+- [ ] **Single working transcription** input (`textarea-working-transcription`, label "Scoresheet transcription"). The reviewer visually compares the two scoresheet images and enters the decided move sequence here — there is no separate Black-side transcription. Helper text explains the visual-comparison workflow (`helper-working-transcription`).
+- [ ] Per-ply rows showing the working transcription, accepted move, status, and per-row actions.
+- [ ] **Seed accepted line** button (`button-seed-accepted`) populates the accepted line from the working transcription. Per-row `Use` button copies the transcribed token into the accepted slot (`button-use-working-{ply}`).
 - [ ] Clear accepted (`button-clear-accepted`).
 - [ ] Legality validation against `chess.js`: rows that would produce an illegal position are flagged.
+- [ ] Per-ply statuses: legal, illegible, illegal, blocked, blank (summary strip `strip-build-summary`). No dual-sheet "conflicts" tally — there is only one transcription.
 - [ ] Live PGN preview (`text-pgn-preview`).
 - [ ] Exports: Copy PGN (`button-copy-pgn`), Download PGN (`button-download-pgn`), Issues MD (`button-download-issue-md`), Issues CSV (`button-download-issue-csv`).
+
+### 7b. Build mode session export / import (file-based persistence)
+- [ ] **Export session** button (`button-export-session`) downloads a JSON file (`reconcile-session-YYYY-MM-DD-...json`) containing the current Build state: selected sample, active page, image/page layout switches, active sheet, PGN metadata, working transcription, accepted-line edits, per-ply reviewer notes, current board ply, plus an app/version marker (`app: "reconcile"`, `version: 2`) and ISO timestamp.
+- [ ] **Import session** button (`button-import-session`) and a hidden file input (`input-session-import`) accept a JSON file and restore the saved state into Build mode. Invalid / unsupported files surface a clear toast error (wrong `app`, unsupported version, malformed JSON).
+- [ ] **Copy session JSON** button (`button-copy-session`) copies the same payload to the clipboard for inline sharing.
+- [ ] The session block (`build-session-block`) lives below the chess board, alongside the PGN/issue export panel in the notes-export-section. It does NOT change the approved layout hierarchy.
+- [ ] Forward-compatible: v1 (two-sheet) session files load with their `whiteText` mapped onto the working transcription so older saves still resume.
+- [ ] File-based only. No localStorage / sessionStorage / IndexedDB / cookies are used by import or export.
 
 ### 8. Theming, accessibility, and constraints
 - [ ] Dark mode toggle in the top bar (`button-theme-toggle`). Theme is `prefers-color-scheme` seeded; no localStorage persistence.
@@ -137,11 +146,13 @@ Panes may stack vertically. The DOM order is preserved (workbench first, board s
 3. Type "test note" into the note editor → header notes-count badge increments.
 4. Paste a transcription with a `-- comment` marker, click **Extract inline notes**, apply → note is merged into the chosen ply.
 5. Click **Copy Markdown** with notes present → clipboard contains a Reviewer Notes section.
-6. Switch to Build mode → confirm the order: top workbench (images | transcriptions + accepted-line table), then board below, then notes + PGN/issue exports below the board.
-7. Seed accepted line → board populates → step through plies, attach a note.
-8. Click **Copy PGN** and **Issues (CSV)** → both produce non-empty output reflecting the accepted line + notes.
-9. Toggle dark mode → all panes adapt; no missing colors.
-10. Resize to 375 px → panes stack in DOM order (workbench → board → notes/exports).
+6. Switch to Build mode → confirm the order: top workbench (images | working transcription + accepted-line table), then board below, then notes + PGN/issue exports + session block below the board. There is **one** transcription input, not two.
+7. Pick the Jeff Martin vs Stephen Jablon sample, toggle between Page 1 / Page 2 and Stack pages — image swaps and metadata is pre-filled.
+8. Type `1. e4 e5 2. Nf3 Nc6` into the working transcription → click **Seed accepted line** → board populates → step through plies, attach a per-ply note.
+9. Click **Copy PGN** and **Issues (CSV)** → both produce non-empty output reflecting the accepted line + notes.
+10. Click **Export session** → a `reconcile-session-...json` file downloads. Change the working transcription / clear the accepted line / delete the note. Click **Import session** and pick the same file → the sample, page layout, metadata, working transcription, accepted line, current ply, and per-ply note are all restored. PGN export still works after import.
+11. Toggle dark mode → all panes adapt; no missing colors.
+12. Resize to 375 px → panes stack in DOM order (workbench → board → notes/exports/session).
 
 ## Automated checks
 

@@ -180,11 +180,11 @@ test.describe('Reconcile regression — Build mode', () => {
     await expectVisible(page, 'textarea-build-note');
     await expectVisible(page, 'badge-build-notes-count-header');
 
-    // Accepted-line workflow.
+    // Accepted-line workflow — single working transcription, single seed button.
     await expectVisible(page, 'build-comparison-block');
-    for (const id of ['button-seed-white', 'button-seed-black', 'button-seed-both']) {
-      await expectVisible(page, id);
-    }
+    await expectVisible(page, 'button-seed-accepted');
+    await expectVisible(page, 'textarea-working-transcription');
+    await expectVisible(page, 'helper-working-transcription');
 
     // PGN exports.
     for (const id of [
@@ -197,9 +197,19 @@ test.describe('Reconcile regression — Build mode', () => {
       await expectVisible(page, id);
     }
 
-    // Functional: seed from white sheet, confirm board controls render after a legal line is accepted.
-    await page.locator('[data-testid="textarea-sheet-white"]').fill('1. e4 e5 2. Nf3 Nc6 3. Bb5 a6');
-    await page.locator('[data-testid="button-seed-white"]').click();
+    // Session export / import controls.
+    for (const id of [
+      'build-session-block',
+      'button-export-session',
+      'button-import-session',
+      'input-session-import',
+    ]) {
+      await expectVisible(page, id);
+    }
+
+    // Functional: seed accepted line from the working transcription, confirm board controls render.
+    await page.locator('[data-testid="textarea-working-transcription"]').fill('1. e4 e5 2. Nf3 Nc6 3. Bb5 a6');
+    await page.locator('[data-testid="button-seed-accepted"]').click();
     await expect(page.locator('[data-testid="board-controls"]')).toBeVisible();
     await expect(page.locator('[data-testid="button-board-next"]')).toBeVisible();
 
