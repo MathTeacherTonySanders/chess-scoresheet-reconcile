@@ -192,8 +192,8 @@ export default function BuildMode() {
   function seedFromWorking() {
     setAccepted(seedAcceptedFromWorking(workingText));
     toast({
-      title: "Seeded accepted line",
-      description: "Accepted line copied from your working transcription.",
+      title: "Accepted all transcribed moves",
+      description: "All parsable moves from the working transcription were copied into the accepted line.",
     });
   }
   function clearAccepted() {
@@ -665,8 +665,10 @@ export default function BuildMode() {
                       size="sm"
                       onClick={seedFromWorking}
                       data-testid="button-seed-accepted"
+                      aria-label="Accept all transcribed moves"
+                      title="Copies every parsable move from the working transcription above into the accepted line and updates the board."
                     >
-                      <Wand2 className="size-3.5 mr-1.5" /> Seed accepted line
+                      <Wand2 className="size-3.5 mr-1.5" /> Accept all transcribed moves
                     </Button>
                     <Button
                       variant="outline"
@@ -1219,7 +1221,7 @@ function BuildTable({
             <div className="font-medium text-foreground">No moves yet</div>
             <p className="mt-1">
               Enter moves into the working transcription above, then click{" "}
-              <span className="font-mono">Seed accepted line</span> to populate this table.
+              <span className="font-mono">Accept all transcribed moves</span> to populate this table from the entire working transcription at once.
             </p>
           </div>
         </div>

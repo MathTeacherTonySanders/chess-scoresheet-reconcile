@@ -112,7 +112,7 @@ Panes may stack vertically. The DOM order is preserved (workbench first, board s
 ### 7. Build mode accepted-line workflow
 - [ ] **Single working transcription** input (`textarea-working-transcription`, label "Scoresheet transcription"). The reviewer visually compares the two scoresheet images and enters the decided move sequence here — there is no separate Black-side transcription. Helper text explains the visual-comparison workflow (`helper-working-transcription`).
 - [ ] Per-ply rows showing the working transcription, accepted move, status, and per-row actions.
-- [ ] **Seed accepted line** button (`button-seed-accepted`) populates the accepted line from the working transcription. Per-row `Use` button copies the transcribed token into the accepted slot (`button-use-working-{ply}`).
+- [ ] **Accept all transcribed moves** button (`button-seed-accepted`, label "Accept all transcribed moves") populates the accepted line in one click from every parsable move in the working transcription. The `data-testid` is preserved as `button-seed-accepted` for regression compatibility. Per-row `Use` button copies the transcribed token into the accepted slot (`button-use-working-{ply}`).
 - [ ] Clear accepted (`button-clear-accepted`).
 - [ ] Legality validation against `chess.js`: rows that would produce an illegal position are flagged.
 - [ ] Per-ply statuses: legal, illegible, illegal, blocked, blank (summary strip `strip-build-summary`). No dual-sheet "conflicts" tally — there is only one transcription.
@@ -148,7 +148,7 @@ Panes may stack vertically. The DOM order is preserved (workbench first, board s
 5. Click **Copy Markdown** with notes present → clipboard contains a Reviewer Notes section.
 6. Switch to Build mode → confirm the order: top workbench (images | working transcription + accepted-line table), then board below, then notes + PGN/issue exports + session block below the board. There is **one** transcription input, not two.
 7. Pick the Jeff Martin vs Stephen Jablon sample, toggle between Page 1 / Page 2 and Stack pages — image swaps and metadata is pre-filled.
-8. Type `1. e4 e5 2. Nf3 Nc6` into the working transcription → click **Seed accepted line** → board populates → step through plies, attach a per-ply note.
+8. Type `1. e4 e5 2. Nf3 Nc6` into the working transcription → click **Accept all transcribed moves** → board populates → step through plies, attach a per-ply note.
 9. Click **Copy PGN** and **Issues (CSV)** → both produce non-empty output reflecting the accepted line + notes.
 10. Click **Export session** → a `reconcile-session-...json` file downloads. Change the working transcription / clear the accepted line / delete the note. Click **Import session** and pick the same file → the sample, page layout, metadata, working transcription, accepted line, current ply, and per-ply note are all restored. PGN export still works after import.
 11. Toggle dark mode → all panes adapt; no missing colors.
